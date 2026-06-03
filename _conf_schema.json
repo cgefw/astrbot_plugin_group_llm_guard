@@ -1,0 +1,20 @@
+{
+  "disabled_group_ids": {
+    "description": "关闭 LLM 聊天的群聊 ID",
+    "type": "list",
+    "default": [],
+    "hint": "填写平台群号 group_id。也支持 platform:group_id、platform_id:group_id 或完整 UMO，用于区分多个同平台机器人。"
+  },
+  "allow_command_llm": {
+    "description": "允许指令内调用 LLM",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，被关闭群聊中的 / 指令仍可执行；如果某个指令主动调用 LLM，也会被放行。"
+  },
+  "blocked_reply": {
+    "description": "拦截提示",
+    "type": "string",
+    "default": "",
+    "hint": "普通 LLM 聊天被拦截时回复的提示。留空表示静默拦截，推荐留空避免群内刷屏。"
+  }
+}
