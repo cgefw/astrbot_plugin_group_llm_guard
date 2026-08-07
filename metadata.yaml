@@ -1,9 +1,9 @@
 name: astrbot_plugin_group_llm_guard
 display_name: 群聊 LLM 聊天开关
-desc: 单独关闭指定群聊的 LLM 聊天能力，同时保留 / 指令。
+desc: 单独关闭指定群聊的 LLM 聊天能力，同时保留 / 指令。支持黑名单与白名单两种模式。
 short_desc: 指定群禁用 LLM 聊天但保留指令。
 author: cgefw
-version: 1.0.0
+version: 1.1.0
 repo: https://github.com/cgefw/astrbot_plugin_group_llm_guard
 astrbot_version: ">=4.16,<5"
 support_platforms:

@@ -1,15 +1,27 @@
 {
+  "whitelist_mode": {
+    "description": "白名单模式",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭（黑名单模式）：仅 disabled_group_ids 中的群被关闭 LLM 聊天。开启后切换到白名单模式：仅 enabled_group_ids 中的群可以使用 LLM 聊天。"
+  },
   "disabled_group_ids": {
-    "description": "关闭 LLM 聊天的群聊 ID",
+    "description": "黑名单：关闭 LLM 聊天的群聊 ID",
     "type": "list",
     "default": [],
-    "hint": "填写平台群号 group_id。也支持 platform:group_id、platform_id:group_id 或完整 UMO，用于区分多个同平台机器人。"
+    "hint": "黑名单模式生效。填写平台群号 group_id。也支持 platform:group_id、platform_id:group_id 或完整 UMO，用于区分多个同平台机器人。"
+  },
+  "enabled_group_ids": {
+    "description": "白名单：允许 LLM 聊天的群聊 ID",
+    "type": "list",
+    "default": [],
+    "hint": "白名单模式生效。仅名单内的群可以使用 LLM 聊天，其他群一律拦截。格式同黑名单。"
   },
   "allow_command_llm": {
     "description": "允许指令内调用 LLM",
     "type": "bool",
     "default": true,
-    "hint": "开启后，被关闭群聊中的 / 指令仍可执行；如果某个指令主动调用 LLM，也会被放行。"
+    "hint": "开启后，被拦截群聊中的 / 指令仍可执行；如果某个指令主动调用 LLM，也会被放行。"
   },
   "blocked_reply": {
     "description": "拦截提示",

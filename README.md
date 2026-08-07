@@ -1,6 +1,6 @@
 # 群聊 LLM 聊天开关
 
-这个 AstrBot 插件用于单独关闭指定群聊的 LLM 聊天功能，同时保留 `/` 指令。
+这个 AstrBot 插件用于单独关闭指定群聊的 LLM 聊天功能，同时保留 `/` 指令。支持黑名单与白名单两种模式。
 
 ## 安装
 
@@ -21,6 +21,7 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 /groupllm on
 /groupllm status
 /groupllm list
+/groupllm mode
 ```
 
 也可以指定群号：
@@ -31,11 +32,25 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 /groupllm status 123456789
 ```
 
-关闭后，目标群里的普通 LLM 聊天请求会被拦截；`/help`、`/reset` 和其他插件指令仍会走 AstrBot 原本的指令流程。
+切换工作模式：
+
+```text
+/groupllm mode blacklist    # 黑名单模式（默认）：仅黑名单中的群被关闭 LLM 聊天
+/groupllm mode whitelist    # 白名单模式：仅白名单中的群可以使用 LLM 聊天
+```
+
+`on` / `off` 的语义始终是“开启/关闭该群的 LLM 聊天”：
+
+- 黑名单模式下，`off` 把群加入黑名单，`on` 把群移出黑名单。
+- 白名单模式下，`on` 把群加入白名单，`off` 把群移出白名单。
+
+被拦截群里的普通 LLM 聊天请求会被拦截；`/help`、`/reset` 和其他插件指令仍会走 AstrBot 原本的指令流程。
 
 ## 配置
 
-- `disabled_group_ids`: 要关闭 LLM 聊天的群号列表。可填 `group_id`、`platform:group_id`、`platform_id:group_id` 或完整 UMO。
+- `whitelist_mode`: 默认关闭。开启后切换到白名单模式，仅 `enabled_group_ids` 中的群可以使用 LLM 聊天。
+- `disabled_group_ids`: 黑名单，要关闭 LLM 聊天的群号列表。可填 `group_id`、`platform:group_id`、`platform_id:group_id` 或完整 UMO。
+- `enabled_group_ids`: 白名单，允许 LLM 聊天的群号列表，仅在白名单模式生效。格式同黑名单。
 - `allow_command_llm`: 默认开启。开启时，指令触发的 LLM 请求会被放行。
 - `blocked_reply`: 默认空字符串，表示静默拦截。填入文字后，拦截普通 LLM 聊天时会回复这段提示。
 
