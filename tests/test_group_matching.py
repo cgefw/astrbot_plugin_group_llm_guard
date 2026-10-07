@@ -71,3 +71,24 @@ def test_llm_hook_whitelist_blocks_unlisted_group(
 
     assert not llm_blocked(plugin, make_event("123"))
     assert llm_blocked(plugin, make_event("999"))
+
+
+def test_status_accepts_prefixed_form_of_current_group(
+    make_plugin, make_event, collect
+):
+    plugin = make_plugin(disabled_group_ids=["123"])
+    event = make_event("123")
+
+    for target in ("aiocqhttp:123", "default:123", "default:GroupMessage:123"):
+        replies = collect(plugin.group_llm_status(event, target))
+        assert replies == [f"群 {target} 的 LLM 聊天当前为：关闭（模式：blacklist）"]
+
+
+def test_llm_hook_matches_isolated_session_only_in_its_group(
+    make_plugin, make_event, collect, llm_blocked
+):
+    plugin = make_plugin(disabled_group_ids=["default:GroupMessage:10002_123"])
+
+    assert llm_blocked(plugin, make_event("123", session_id="10002_123"))
+    replies = collect(plugin.group_llm_status(make_event("456"), "123"))
+    assert replies == ["群 123 的 LLM 聊天当前为：开启（模式：blacklist）"]

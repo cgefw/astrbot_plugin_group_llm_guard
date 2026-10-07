@@ -37,7 +37,7 @@ class _Star:
         self.context = context
 
 
-def _install_astrbot_stubs() -> None:
+def _astrbot_stubs() -> dict[str, types.ModuleType]:
     api = types.ModuleType("astrbot.api")
     api.AstrBotConfig = AstrBotConfig
     api.logger = logging.getLogger("astrbot")
@@ -61,28 +61,43 @@ def _install_astrbot_stubs() -> None:
     star.Context = object
     star.Star = _Star
 
-    sys.modules.update(
-        {
-            "astrbot": types.ModuleType("astrbot"),
-            "astrbot.api": api,
-            "astrbot.api.event": event,
-            "astrbot.api.platform": platform,
-            "astrbot.api.provider": provider,
-            "astrbot.api.star": star,
-        }
-    )
+    return {
+        "astrbot": types.ModuleType("astrbot"),
+        "astrbot.api": api,
+        "astrbot.api.event": event,
+        "astrbot.api.platform": platform,
+        "astrbot.api.provider": provider,
+        "astrbot.api.star": star,
+    }
 
 
-_install_astrbot_stubs()
-_spec = importlib.util.spec_from_file_location(
-    "group_llm_guard_main", Path(__file__).resolve().parent.parent / "main.py"
-)
-plugin_main = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(plugin_main)
+def _load_plugin_main() -> types.ModuleType:
+    # Stubs only live in sys.modules while main.py is imported, so a real
+    # astrbot package in the same interpreter is left untouched.
+    stubs = _astrbot_stubs()
+    saved = {name: sys.modules.get(name) for name in stubs}
+    sys.modules.update(stubs)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "group_llm_guard_main", Path(__file__).resolve().parent.parent / "main.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+plugin_main = _load_plugin_main()
 
 
 class FakeEvent:
-    """Mimics an aiocqhttp event: a group's session_id is its group_id."""
+    """Mimics an aiocqhttp event: a group's session_id is its group_id unless
+    session isolation (unique_session) gives it a per-user session_id."""
 
     def __init__(
         self,
@@ -90,11 +105,12 @@ class FakeEvent:
         sender_id: str = "10001",
         platform_name: str = "aiocqhttp",
         platform_id: str = "default",
+        session_id: str = "",
     ) -> None:
         self.group_id = group_id
         self.platform_name = platform_name
         self.platform_id = platform_id
-        self.session_id = group_id or sender_id
+        self.session_id = session_id or group_id or sender_id
         message_type = MessageType.GROUP_MESSAGE if group_id else MessageType.FRIEND_MESSAGE
         self.unified_msg_origin = f"{platform_id}:{message_type.value}:{self.session_id}"
         self.extras: dict = {}
