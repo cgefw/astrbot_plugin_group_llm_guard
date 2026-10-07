@@ -1,5 +1,7 @@
 # 群聊 LLM 聊天开关
 
+## ⭐ 如果可以的话，能去 [GitHub](https://github.com/cgefw/astrbot_plugin_group_llm_guard) 帮我点个 Star 吗？谢谢啦！
+
 这个 AstrBot 插件用于单独关闭指定群聊的 LLM 聊天功能，同时保留 `/` 指令。支持黑名单与白名单两种模式。
 
 ## 安装
