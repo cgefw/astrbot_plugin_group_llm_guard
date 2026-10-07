@@ -86,3 +86,15 @@ def test_whitelist_on_does_not_duplicate_existing_entry(
     collect(plugin.enable_group_llm(make_event("123")))
 
     assert plugin.config["enabled_group_ids"] == ["aiocqhttp:123"]
+
+
+def test_prefixed_argument_matches_bare_entry_and_is_stored_verbatim(
+    make_plugin, make_event, collect
+):
+    plugin = make_plugin(disabled_group_ids=["123"])
+
+    collect(plugin.enable_group_llm(make_event("456"), "aiocqhttp:123"))
+    assert plugin.config["disabled_group_ids"] == []
+
+    collect(plugin.disable_group_llm(make_event("456"), "aiocqhttp:999"))
+    assert plugin.config["disabled_group_ids"] == ["aiocqhttp:999"]
