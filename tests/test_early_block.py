@@ -36,12 +36,16 @@ def test_handlers_are_registered_as_intended(plugin_module):
     guard = plugin_module.GroupLLMGuard
     early = guard.block_group_default_llm.registrations
 
-    assert ("custom_filter", (plugin_module.GroupWakeMessageFilter,), {}) in early
-    assert (
-        "event_message_type",
-        (plugin_module.filter.EventMessageType.ALL,),
-        {"priority": -10_000},
-    ) in early
+    # Real AstrBot keeps only the first-applied (bottom) decorator's kwargs,
+    # so the priority must sit on the decorator that is recorded first.
+    assert early == [
+        (
+            "event_message_type",
+            (plugin_module.filter.EventMessageType.ALL,),
+            {"priority": -10_000},
+        ),
+        ("custom_filter", (plugin_module.GroupWakeMessageFilter,), {}),
+    ]
     assert guard.block_group_llm_waiting.registrations == [
         ("on_waiting_llm_request", (), {"priority": 10_000})
     ]
@@ -188,3 +192,38 @@ def test_event_stopped_even_if_notice_fails(make_plugin, make_event):
     with pytest.raises(RuntimeError):
         requested(plugin, event)
     assert event.stopped
+
+
+def test_default_chat_stays_blocked_when_request_is_built_after_waiting_hook(
+    make_plugin, make_event
+):
+    # AstrBot 4.16 ignores the waiting hook's result and builds the default
+    # chat request (setting provider_request) before calling on_llm_request.
+    plugin = make_plugin(disabled_group_ids=["123"])
+    event = command_event(make_event)
+
+    asyncio.run(plugin.block_group_llm_waiting(event))
+    event.stopped = False  # observe on_llm_request's own decision
+    event.set_extra("provider_request", types.SimpleNamespace(prompt="hi"))
+
+    assert requested(plugin, event)
+
+
+def test_no_notice_when_another_plugin_disabled_default_chat(
+    make_plugin, make_event, collect
+):
+    plugin = make_plugin(disabled_group_ids=["123"], blocked_reply="已关闭")
+    event = make_event("123")
+    event.should_call_llm(True)
+
+    assert collect(plugin.block_group_default_llm(event)) == []
+
+
+def test_hook_skips_notice_when_plugin_already_replied(make_plugin, make_event):
+    plugin = make_plugin(disabled_group_ids=["123"], blocked_reply="已关闭")
+    event = make_event("123")
+    event.set_extra("provider_request", types.SimpleNamespace(prompt="from plugin"))
+    event._has_send_oper = True
+
+    assert waiting(plugin, event)
+    assert event.sent == []

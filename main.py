@@ -26,19 +26,21 @@ class GroupLLMGuard(Star):
         super().__init__(context)
         self.config = config
 
-    # 最后执行：此时其他插件的回复都已发出，可以据此判断是否还需要提示。
+    # 以最低优先级尽量最后执行，此时其他插件的回复基本都已发出，可以据此决定是否提示。
+    # priority 只在最先生效（最下面）的装饰器上起作用。
     @filter.custom_filter(GroupWakeMessageFilter)
     @filter.event_message_type(filter.EventMessageType.ALL, priority=-10_000)
     async def block_group_default_llm(self, event: AstrMessageEvent):
         """在默认 LLM 聊天开始前关闭它，避免“正在输入”、图片转述等请求准备工作。"""
         group_id = self._blocked_group_id(event)
-        if not group_id:
+        # 其他插件已经关掉默认聊天时，这条消息本来就不会到 LLM，不必再提示。
+        if not group_id or getattr(event, "call_llm", False):
             return
 
         # 传 True 表示禁止 AstrBot 默认的 LLM 请求；指令和插件自己的 request_llm 不受影响。
         # 指令执行后如果什么都没回复，AstrBot 也不会再转去默认聊天。
         event.should_call_llm(True)
-        if self._is_command_event(event) or getattr(event, "_has_send_oper", False):
+        if self._is_command_event(event):
             return
         notice = self._mark_blocked(event, group_id, event.message_str)
         if notice:
@@ -85,7 +87,10 @@ class GroupLLMGuard(Star):
         return bool(is_default_chat)
 
     def _mark_blocked(self, event: AstrMessageEvent, group_id: str, prompt: str) -> str:
-        """记录拦截并返回要发送的提示；同一事件只在第一次拦截时返回提示。"""
+        """记录拦截并返回要发送的提示。
+
+        同一事件只在第一次拦截时返回提示；这条消息已经有其他回复时也不提示。
+        """
         if event.get_extra(PLUGIN_MARK_BLOCKED):
             return ""
         event.set_extra(PLUGIN_MARK_BLOCKED, True)
@@ -95,6 +100,8 @@ class GroupLLMGuard(Star):
             event.unified_msg_origin,
             (prompt or "")[:80],
         )
+        if getattr(event, "_has_send_oper", False):
+            return ""
         return str(self.config.get("blocked_reply", "") or "").strip()
 
     @filter.command_group("groupllm", alias={"群llm", "gllm"})
