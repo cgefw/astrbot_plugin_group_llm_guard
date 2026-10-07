@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.platform import MessageType
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
@@ -209,14 +210,22 @@ class GroupLLMGuard(Star):
         self, event: AstrMessageEvent, group_id: str, groups: list[str]
     ) -> bool:
         group_set = set(groups)
+        return any(
+            candidate in group_set
+            for candidate in self._group_candidates(event, group_id)
+        )
+
+    def _group_candidates(self, event: AstrMessageEvent, group_id: str) -> set[str]:
         candidates = {
             group_id,
-            event.session_id,
-            event.unified_msg_origin,
             f"{event.get_platform_name()}:{group_id}",
             f"{event.get_platform_id()}:{group_id}",
+            f"{event.get_platform_id()}:{MessageType.GROUP_MESSAGE.value}:{group_id}",
         }
-        return any(candidate in group_set for candidate in candidates if candidate)
+        # session_id 和 UMO 描述的是当前会话，只有目标群就是当前群时才能参与匹配。
+        if group_id == self._group_id(event):
+            candidates.update({event.session_id, event.unified_msg_origin})
+        return {candidate for candidate in candidates if candidate}
 
     def _is_command_event(self, event: AstrMessageEvent) -> bool:
         activated_handlers = event.get_extra("activated_handlers", []) or []
