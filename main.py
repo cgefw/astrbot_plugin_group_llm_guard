@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.platform import MessageType
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
@@ -208,15 +209,27 @@ class GroupLLMGuard(Star):
     def _is_group_listed(
         self, event: AstrMessageEvent, group_id: str, groups: list[str]
     ) -> bool:
-        group_set = set(groups)
+        return not self._group_candidates(event, group_id).isdisjoint(groups)
+
+    def _group_candidates(self, event: AstrMessageEvent, group_id: str) -> set[str]:
+        platform_name = event.get_platform_name()
+        platform_id = event.get_platform_id()
+        umo_prefix = f"{platform_id}:{MessageType.GROUP_MESSAGE.value}:"
+        # 指令参数可能带有当前平台的前缀，先还原成群号，避免认不出当前群。
+        for prefix in (umo_prefix, f"{platform_name}:", f"{platform_id}:"):
+            if group_id.startswith(prefix):
+                group_id = group_id[len(prefix) :]
+                break
         candidates = {
             group_id,
-            event.session_id,
-            event.unified_msg_origin,
-            f"{event.get_platform_name()}:{group_id}",
-            f"{event.get_platform_id()}:{group_id}",
+            f"{platform_name}:{group_id}",
+            f"{platform_id}:{group_id}",
+            f"{umo_prefix}{group_id}",
         }
-        return any(candidate in group_set for candidate in candidates if candidate)
+        # session_id 和 UMO 描述的是当前会话，只有目标群就是当前群时才能参与匹配。
+        if group_id and group_id == self._group_id(event):
+            candidates.update({event.session_id, event.unified_msg_origin})
+        return {candidate for candidate in candidates if candidate}
 
     def _is_command_event(self, event: AstrMessageEvent) -> bool:
         activated_handlers = event.get_extra("activated_handlers", []) or []
