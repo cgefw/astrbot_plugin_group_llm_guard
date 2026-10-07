@@ -56,11 +56,14 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 
 ## 说明
 
-插件通过 `on_llm_request` 钩子拦截目标群聊的 LLM 请求，在钩子内调用 `event.stop_event()`。这会终止整个消息事件：本次 LLM 请求不会发出，优先级更低的其他 `on_llm_request` 钩子也不会再执行。
+插件分两层拦截：
 
-普通聊天的 LLM 请求在指令处理完之后才发起，所以拦截它不会影响 `/` 指令。指令自己调用 LLM（`yield event.request_llm(...)`）时，钩子会在指令执行过程中触发，是否放行由 `allow_command_llm` 决定。
+- **普通聊天**：被拦截群里的唤醒消息（@ 机器人、带唤醒前缀、引用机器人的消息，以及未设置忽略时的 @全体成员），会在 AstrBot 开始准备 LLM 请求之前调用 `event.should_call_llm(True)`，关闭默认的 LLM 聊天流程。因此不会出现“正在输入”提示，也不会做图片转述等请求准备工作；指令执行后即使没有回复，也不会再转去默认聊天。`/` 指令本身照常执行。只有消息没有触发指令、也没有被其他插件回复时，才会发送 `blocked_reply`（插件请求被拦截时同理）。
+- **插件发起的 LLM 请求**（例如指令里的 `yield event.request_llm(...)`）：在 `on_waiting_llm_request` 和 `on_llm_request` 钩子里判断，是否放行由 `allow_command_llm` 决定。拦截时调用 `event.stop_event()`，这会终止整个消息事件，优先级更低的其他 `on_llm_request` 钩子也不会再执行。较新的 AstrBot 会在 `on_waiting_llm_request` 处结束请求，跳过加锁和请求准备，但“正在输入”提示在这之前已经发出；部分旧版本（如 4.16）不理会这个钩子的结果，要到 `on_llm_request` 才拦下。
 
 已知限制：
 
-- 拦截发生在 AstrBot 准备 LLM 请求之后。在此之前，“正在输入”提示、会话与对话记录的准备、图片转述（如果配置了图片转述模型）等预处理仍会执行。
-- 只拦截经过 AstrBot LLM 流程的请求，即普通聊天和 `event.request_llm`。其他插件直接调用 `context.llm_generate()` 或提供商接口时不经过这个钩子，不会被拦截。
+- AstrBot 在插件处理消息之前的预处理（如语音转文字、媒体下载）不受本插件影响，在被拦截的群里仍会执行。
+- 只拦截经过 AstrBot LLM 流程的请求，即普通聊天和 `event.request_llm`。其他插件直接调用 `context.llm_generate()` 或提供商接口时不经过这些钩子，不会被拦截。
+- “是否为指令”按整条消息判断：如果一条消息同时触发了指令和其他插件的非指令处理器，后者发起的 LLM 请求也会被当作指令请求。
+- 如果 AstrBot 因为其他原因本来就不会回复这条消息（例如只 @ 了机器人而没有内容、关闭了 AI 能力，或设置了 LLM 唤醒前缀而消息没带），`blocked_reply` 仍可能发送。
