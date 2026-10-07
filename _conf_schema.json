@@ -21,7 +21,7 @@
     "description": "允许指令内调用 LLM",
     "type": "bool",
     "default": true,
-    "hint": "开启后，被拦截群聊中的 / 指令仍可执行；如果某个指令主动调用 LLM，也会被放行。"
+    "hint": "开启后，指令内主动调用的 LLM 请求会被放行；关闭后这些请求也会被拦截，该指令会在调用 LLM 处终止。不调用 LLM 的 / 指令不受此项影响。"
   },
   "blocked_reply": {
     "description": "拦截提示",
