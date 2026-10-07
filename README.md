@@ -14,7 +14,7 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 
 ## 用法
 
-群内管理员可以使用：
+AstrBot 管理员（WebUI 里配置的管理员 ID，不是 QQ 群管理员）可以使用：
 
 ```text
 /groupllm off
@@ -56,4 +56,4 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 
 ## 说明
 
-插件通过 `on_llm_request` 钩子拦截目标群聊的非指令 LLM 请求。它不会调用 `event.stop_event()` 去提前终止普通消息事件，因此不会把 `/` 指令一并关掉。
+插件通过 `on_llm_request` 钩子拦截目标群聊的非指令 LLM 请求，在钩子内调用 `event.stop_event()` 终止这次 LLM 请求。这个钩子在指令处理之后才触发，所以不会把 `/` 指令一并关掉。
