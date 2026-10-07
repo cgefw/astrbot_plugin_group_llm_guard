@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.platform import MessageType
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
@@ -57,13 +58,17 @@ class GroupLLMGuard(Star):
             return
 
         if self._whitelist_mode():
-            enabled_groups = [gid for gid in self._enabled_groups() if gid != target_group]
-            self._set_enabled_groups(enabled_groups)
+            enabled_groups = self._enabled_groups()
+            remaining_groups = self._without_group(event, target_group, enabled_groups)
+            if len(remaining_groups) == len(enabled_groups):
+                yield event.plain_result(f"群 {target_group} 不在白名单中，LLM 聊天已是关闭状态。")
+                return
+            self._set_enabled_groups(remaining_groups)
             yield event.plain_result(f"已将群 {target_group} 移出白名单，LLM 聊天已关闭。/ 指令仍可使用。")
             return
 
         disabled_groups = self._disabled_groups()
-        if target_group not in disabled_groups:
+        if not self._is_group_listed(event, target_group, disabled_groups):
             disabled_groups.append(target_group)
             self._set_disabled_groups(disabled_groups)
 
@@ -80,14 +85,18 @@ class GroupLLMGuard(Star):
 
         if self._whitelist_mode():
             enabled_groups = self._enabled_groups()
-            if target_group not in enabled_groups:
+            if not self._is_group_listed(event, target_group, enabled_groups):
                 enabled_groups.append(target_group)
                 self._set_enabled_groups(enabled_groups)
             yield event.plain_result(f"已将群 {target_group} 加入白名单，LLM 聊天已开启。")
             return
 
-        disabled_groups = [gid for gid in self._disabled_groups() if gid != target_group]
-        self._set_disabled_groups(disabled_groups)
+        disabled_groups = self._disabled_groups()
+        remaining_groups = self._without_group(event, target_group, disabled_groups)
+        if len(remaining_groups) == len(disabled_groups):
+            yield event.plain_result(f"群 {target_group} 不在黑名单中，LLM 聊天已是开启状态。")
+            return
+        self._set_disabled_groups(remaining_groups)
 
         yield event.plain_result(f"已恢复群 {target_group} 的 LLM 聊天。")
 
@@ -188,6 +197,12 @@ class GroupLLMGuard(Star):
                 seen.add(normalized)
         return normalized_groups
 
+    def _without_group(
+        self, event: AstrMessageEvent, group_id: str, groups: list[str]
+    ) -> list[str]:
+        candidates = self._group_candidates(event, group_id)
+        return [group for group in groups if group not in candidates]
+
     def _allow_command_llm(self) -> bool:
         return bool(self.config.get("allow_command_llm", True))
 
@@ -209,14 +224,22 @@ class GroupLLMGuard(Star):
         self, event: AstrMessageEvent, group_id: str, groups: list[str]
     ) -> bool:
         group_set = set(groups)
+        return any(
+            candidate in group_set
+            for candidate in self._group_candidates(event, group_id)
+        )
+
+    def _group_candidates(self, event: AstrMessageEvent, group_id: str) -> set[str]:
         candidates = {
             group_id,
-            event.session_id,
-            event.unified_msg_origin,
             f"{event.get_platform_name()}:{group_id}",
             f"{event.get_platform_id()}:{group_id}",
+            f"{event.get_platform_id()}:{MessageType.GROUP_MESSAGE.value}:{group_id}",
         }
-        return any(candidate in group_set for candidate in candidates if candidate)
+        # session_id 和 UMO 描述的是当前会话，只有目标群就是当前群时才能参与匹配。
+        if group_id == self._group_id(event):
+            candidates.update({event.session_id, event.unified_msg_origin})
+        return {candidate for candidate in candidates if candidate}
 
     def _is_command_event(self, event: AstrMessageEvent) -> bool:
         activated_handlers = event.get_extra("activated_handlers", []) or []
