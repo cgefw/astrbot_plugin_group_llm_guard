@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，不带 v，必须与 metadata.yaml 里的 version 一致
+        required: true
+      ref:
+        description: 要发布的分支、tag 或提交
+        required: false
+        default: main
+      notes:
+        description: 发布说明（Markdown），留空则由 GitHub 自动生成
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ github.token }}
+      PACKAGE: astrbot_plugin_group_llm_guard
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Check version
+        run: |
+          meta_version="$(sed -n 's/^version: *//p' metadata.yaml)"
+          if [ "$meta_version" != "$VERSION" ]; then
+            echo "metadata.yaml 的版本是 $meta_version，与输入的 $VERSION 不一致" >&2
+            exit 1
+          fi
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION 已经发布过" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest tests
+
+      - name: Build plugin zip
+        run: |
+          git archive --format=zip --prefix="$PACKAGE/" -o "$PACKAGE-v$VERSION.zip" HEAD \
+            main.py metadata.yaml _conf_schema.json requirements.txt README.md
+          sha256sum "$PACKAGE-v$VERSION.zip" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        run: |
+          if [ -n "$NOTES" ]; then
+            printf '%s\n' "$NOTES" > notes.md
+            notes_args=(--notes-file notes.md)
+          else
+            notes_args=(--generate-notes)
+          fi
+          gh release create "v$VERSION" "$PACKAGE-v$VERSION.zip" SHA256SUMS.txt \
+            --target "$(git rev-parse HEAD)" --title "v$VERSION" "${notes_args[@]}"
