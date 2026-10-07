@@ -92,3 +92,15 @@ def test_llm_hook_matches_isolated_session_only_in_its_group(
     assert llm_blocked(plugin, make_event("123", session_id="10002_123"))
     replies = collect(plugin.group_llm_status(make_event("456"), "123"))
     assert replies == ["群 123 的 LLM 聊天当前为：开启（模式：blacklist）"]
+
+
+def test_prefix_only_target_does_not_match_private_session(
+    make_plugin, make_event, collect
+):
+    plugin = make_plugin(disabled_group_ids=["10001"])
+
+    replies = collect(
+        plugin.group_llm_status(make_event(sender_id="10001"), "aiocqhttp:")
+    )
+
+    assert replies == ["群 aiocqhttp: 的 LLM 聊天当前为：开启（模式：blacklist）"]

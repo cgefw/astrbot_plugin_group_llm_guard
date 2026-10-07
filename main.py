@@ -227,7 +227,7 @@ class GroupLLMGuard(Star):
             f"{umo_prefix}{group_id}",
         }
         # session_id 和 UMO 描述的是当前会话，只有目标群就是当前群时才能参与匹配。
-        if group_id == self._group_id(event):
+        if group_id and group_id == self._group_id(event):
             candidates.update({event.session_id, event.unified_msg_origin})
         return {candidate for candidate in candidates if candidate}
 
