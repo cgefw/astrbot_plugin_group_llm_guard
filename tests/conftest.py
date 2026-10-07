@@ -28,8 +28,28 @@ class _CommandGroup:
         return lambda func: func
 
 
+class EventMessageType(enum.Flag):
+    GROUP_MESSAGE = enum.auto()
+    PRIVATE_MESSAGE = enum.auto()
+    OTHER_MESSAGE = enum.auto()
+    ALL = GROUP_MESSAGE | PRIVATE_MESSAGE | OTHER_MESSAGE
+
+
 def _passthrough(*args, **kwargs):
     return lambda func: func
+
+
+def _recorder(name: str):
+    """A decorator factory that records how a handler was registered."""
+
+    def register(*args, **kwargs):
+        def decorator(func):
+            func.__dict__.setdefault("registrations", []).append((name, args, kwargs))
+            return func
+
+        return decorator
+
+    return register
 
 
 class _CustomFilter:
@@ -51,12 +71,12 @@ def _astrbot_stubs() -> dict[str, types.ModuleType]:
     event.AstrMessageEvent = object
     event.filter = types.SimpleNamespace(
         PermissionType=types.SimpleNamespace(ADMIN="admin"),
-        EventMessageType=types.SimpleNamespace(GROUP_MESSAGE="group"),
+        EventMessageType=EventMessageType,
         CustomFilter=_CustomFilter,
-        custom_filter=_passthrough,
-        event_message_type=_passthrough,
-        on_llm_request=_passthrough,
-        on_waiting_llm_request=_passthrough,
+        custom_filter=_recorder("custom_filter"),
+        event_message_type=_recorder("event_message_type"),
+        on_llm_request=_recorder("on_llm_request"),
+        on_waiting_llm_request=_recorder("on_waiting_llm_request"),
         permission_type=_passthrough,
         command_group=lambda *args, **kwargs: lambda func: _CommandGroup(),
     )
@@ -123,6 +143,7 @@ class FakeEvent:
         self.message_str = message_str
         self.is_at_or_wake_command = is_wake
         self.call_llm = False
+        self._has_send_oper = False
         self.platform_name = platform_name
         self.platform_id = platform_id
         self.session_id = session_id or group_id or sender_id

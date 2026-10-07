@@ -8,16 +8,17 @@ from astrbot.api.star import Context, Star
 
 
 PLUGIN_MARK_BLOCKED = "astrbot_plugin_group_llm_guard_blocked"
+PLUGIN_MARK_DEFAULT_CHAT = "astrbot_plugin_group_llm_guard_default_chat"
 COMMAND_FILTER_CLASS_NAMES = {"CommandFilter", "CommandGroupFilter"}
 MODE_BLACKLIST = "blacklist"
 MODE_WHITELIST = "whitelist"
 
 
-class WakeMessageFilter(filter.CustomFilter):
-    """只匹配会触发默认 LLM 聊天的唤醒消息，不改变其他群消息的唤醒状态。"""
+class GroupWakeMessageFilter(filter.CustomFilter):
+    """只匹配群里会触发默认 LLM 聊天的唤醒消息，不改变其他消息的唤醒状态。"""
 
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
-        return bool(event.is_at_or_wake_command)
+        return bool(event.is_at_or_wake_command and event.get_group_id())
 
 
 class GroupLLMGuard(Star):
@@ -25,60 +26,76 @@ class GroupLLMGuard(Star):
         super().__init__(context)
         self.config = config
 
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    @filter.custom_filter(WakeMessageFilter)
-    async def block_group_default_llm(self, event: AstrMessageEvent) -> None:
-        """在默认 LLM 聊天开始前关闭它，避免“正在输入”、图片转述等预处理。"""
-        group_id = self._group_id(event)
-        if not group_id or not self._is_group_blocked(event, group_id):
+    # 最后执行：此时其他插件的回复都已发出，可以据此判断是否还需要提示。
+    @filter.custom_filter(GroupWakeMessageFilter)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=-10_000)
+    async def block_group_default_llm(self, event: AstrMessageEvent):
+        """在默认 LLM 聊天开始前关闭它，避免“正在输入”、图片转述等请求准备工作。"""
+        group_id = self._blocked_group_id(event)
+        if not group_id:
             return
 
         # 传 True 表示禁止 AstrBot 默认的 LLM 请求；指令和插件自己的 request_llm 不受影响。
         # 指令执行后如果什么都没回复，AstrBot 也不会再转去默认聊天。
         event.should_call_llm(True)
-        if not self._is_command_event(event):
-            await self._notify_blocked(event, group_id, event.message_str)
+        if self._is_command_event(event) or getattr(event, "_has_send_oper", False):
+            return
+        notice = self._mark_blocked(event, group_id, event.message_str)
+        if notice:
+            yield event.plain_result(notice)
 
     @filter.on_waiting_llm_request(priority=10_000)
     async def block_group_llm_waiting(self, event: AstrMessageEvent) -> None:
-        """插件发起的 LLM 请求：较新的 AstrBot 会在此结束，跳过加锁和请求预处理。"""
-        await self._block_llm_request(event, "")
+        """较新的 AstrBot 会在此结束请求，跳过加锁和请求准备。"""
+        # 插件 yield 的请求在此之前就放进了 provider_request，默认聊天要到之后才放。
+        provider_request = event.get_extra("provider_request")
+        event.set_extra(PLUGIN_MARK_DEFAULT_CHAT, provider_request is None)
+        prompt = getattr(provider_request, "prompt", "") or event.message_str
+        await self._block_llm_request(event, prompt)
 
     @filter.on_llm_request(priority=10_000)
     async def block_group_llm_chat(
         self, event: AstrMessageEvent, req: ProviderRequest
     ) -> None:
         """Block LLM requests from configured groups unless they come from commands."""
-        await self._block_llm_request(event, getattr(req, "prompt", "") or "")
+        await self._block_llm_request(event, getattr(req, "prompt", ""))
 
     async def _block_llm_request(self, event: AstrMessageEvent, prompt: str) -> None:
-        group_id = self._group_id(event)
-        if not group_id or not self._is_group_blocked(event, group_id):
+        group_id = self._blocked_group_id(event)
+        if not group_id:
             return
 
-        if self._allow_command_llm() and self._is_command_event(event):
+        if (
+            not self._is_default_chat(event)
+            and self._allow_command_llm()
+            and self._is_command_event(event)
+        ):
             return
 
-        await self._notify_blocked(event, group_id, prompt)
         event.stop_event()
-
-    async def _notify_blocked(
-        self, event: AstrMessageEvent, group_id: str, prompt: str
-    ) -> None:
-        # 同一事件可能先后经过多个拦截点，提示只发一次。
-        if event.get_extra(PLUGIN_MARK_BLOCKED):
-            return
-        event.set_extra(PLUGIN_MARK_BLOCKED, True)
-        notice = str(self.config.get("blocked_reply", "") or "").strip()
+        notice = self._mark_blocked(event, group_id, prompt)
         if notice:
             await event.send(event.plain_result(notice))
 
+    def _is_default_chat(self, event: AstrMessageEvent) -> bool:
+        is_default_chat = event.get_extra(PLUGIN_MARK_DEFAULT_CHAT)
+        if is_default_chat is None:
+            # 第三方 Agent 不触发 on_waiting_llm_request，也不会自己设置 provider_request。
+            return event.get_extra("provider_request") is None
+        return bool(is_default_chat)
+
+    def _mark_blocked(self, event: AstrMessageEvent, group_id: str, prompt: str) -> str:
+        """记录拦截并返回要发送的提示；同一事件只在第一次拦截时返回提示。"""
+        if event.get_extra(PLUGIN_MARK_BLOCKED):
+            return ""
+        event.set_extra(PLUGIN_MARK_BLOCKED, True)
         logger.info(
             "GroupLLMGuard blocked LLM chat: group=%s umo=%s prompt=%s",
             group_id,
             event.unified_msg_origin,
             (prompt or "")[:80],
         )
+        return str(self.config.get("blocked_reply", "") or "").strip()
 
     @filter.command_group("groupllm", alias={"群llm", "gllm"})
     def groupllm(self):
@@ -267,6 +284,13 @@ class GroupLLMGuard(Star):
 
     def _resolve_group_arg(self, event: AstrMessageEvent, group_id: str) -> str:
         return str(group_id or self._group_id(event) or "").strip()
+
+    def _blocked_group_id(self, event: AstrMessageEvent) -> str:
+        """事件所在群被拦截时返回群号，否则返回空字符串。"""
+        group_id = self._group_id(event)
+        if group_id and self._is_group_blocked(event, group_id):
+            return group_id
+        return ""
 
     def _is_group_blocked(self, event: AstrMessageEvent, group_id: str) -> bool:
         if self._whitelist_mode():
