@@ -32,6 +32,11 @@ def _passthrough(*args, **kwargs):
     return lambda func: func
 
 
+class _CustomFilter:
+    def __init__(self, raise_error: bool = True, **kwargs) -> None:
+        self.raise_error = raise_error
+
+
 class _Star:
     def __init__(self, context) -> None:
         self.context = context
@@ -46,7 +51,12 @@ def _astrbot_stubs() -> dict[str, types.ModuleType]:
     event.AstrMessageEvent = object
     event.filter = types.SimpleNamespace(
         PermissionType=types.SimpleNamespace(ADMIN="admin"),
+        EventMessageType=types.SimpleNamespace(GROUP_MESSAGE="group"),
+        CustomFilter=_CustomFilter,
+        custom_filter=_passthrough,
+        event_message_type=_passthrough,
         on_llm_request=_passthrough,
+        on_waiting_llm_request=_passthrough,
         permission_type=_passthrough,
         command_group=lambda *args, **kwargs: lambda func: _CommandGroup(),
     )
@@ -106,8 +116,13 @@ class FakeEvent:
         platform_name: str = "aiocqhttp",
         platform_id: str = "default",
         session_id: str = "",
+        message_str: str = "hello",
+        is_wake: bool = True,
     ) -> None:
         self.group_id = group_id
+        self.message_str = message_str
+        self.is_at_or_wake_command = is_wake
+        self.call_llm = False
         self.platform_name = platform_name
         self.platform_id = platform_id
         self.session_id = session_id or group_id or sender_id
@@ -135,11 +150,19 @@ class FakeEvent:
     def stop_event(self) -> None:
         self.stopped = True
 
+    def should_call_llm(self, call_llm: bool) -> None:
+        self.call_llm = call_llm
+
     def plain_result(self, text: str) -> str:
         return text
 
     async def send(self, result) -> None:
         self.sent.append(result)
+
+
+@pytest.fixture
+def plugin_module():
+    return plugin_main
 
 
 @pytest.fixture
