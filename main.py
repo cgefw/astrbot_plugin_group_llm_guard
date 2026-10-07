@@ -58,17 +58,21 @@ class GroupLLMGuard(Star):
             return
 
         if self._whitelist_mode():
-            enabled_groups = self._enabled_groups()
-            remaining_groups = self._without_group(event, target_group, enabled_groups)
-            if len(remaining_groups) == len(enabled_groups):
-                yield event.plain_result(f"群 {target_group} 不在白名单中，LLM 聊天已是关闭状态。")
+            remaining_groups, removed_groups = self._split_group(
+                event, target_group, self._enabled_groups()
+            )
+            if not removed_groups:
+                yield event.plain_result(f"白名单中没有与群 {target_group} 匹配的条目，未做修改。")
                 return
             self._set_enabled_groups(remaining_groups)
-            yield event.plain_result(f"已将群 {target_group} 移出白名单，LLM 聊天已关闭。/ 指令仍可使用。")
+            yield event.plain_result(
+                f"已将群 {target_group} 移出白名单，LLM 聊天已关闭。/ 指令仍可使用。"
+                + self._removed_note(target_group, removed_groups)
+            )
             return
 
         disabled_groups = self._disabled_groups()
-        if not self._is_group_listed(event, target_group, disabled_groups):
+        if target_group not in disabled_groups:
             disabled_groups.append(target_group)
             self._set_disabled_groups(disabled_groups)
 
@@ -85,20 +89,24 @@ class GroupLLMGuard(Star):
 
         if self._whitelist_mode():
             enabled_groups = self._enabled_groups()
-            if not self._is_group_listed(event, target_group, enabled_groups):
+            if target_group not in enabled_groups:
                 enabled_groups.append(target_group)
                 self._set_enabled_groups(enabled_groups)
             yield event.plain_result(f"已将群 {target_group} 加入白名单，LLM 聊天已开启。")
             return
 
-        disabled_groups = self._disabled_groups()
-        remaining_groups = self._without_group(event, target_group, disabled_groups)
-        if len(remaining_groups) == len(disabled_groups):
-            yield event.plain_result(f"群 {target_group} 不在黑名单中，LLM 聊天已是开启状态。")
+        remaining_groups, removed_groups = self._split_group(
+            event, target_group, self._disabled_groups()
+        )
+        if not removed_groups:
+            yield event.plain_result(f"黑名单中没有与群 {target_group} 匹配的条目，未做修改。")
             return
         self._set_disabled_groups(remaining_groups)
 
-        yield event.plain_result(f"已恢复群 {target_group} 的 LLM 聊天。")
+        yield event.plain_result(
+            f"已恢复群 {target_group} 的 LLM 聊天。"
+            + self._removed_note(target_group, removed_groups)
+        )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @groupllm.command("mode", alias={"模式"})
@@ -197,11 +205,19 @@ class GroupLLMGuard(Star):
                 seen.add(normalized)
         return normalized_groups
 
-    def _without_group(
+    def _split_group(
         self, event: AstrMessageEvent, group_id: str, groups: list[str]
-    ) -> list[str]:
+    ) -> tuple[list[str], list[str]]:
+        """把名单拆成 (保留的条目, 与该群匹配而被移除的条目)。"""
         candidates = self._group_candidates(event, group_id)
-        return [group for group in groups if group not in candidates]
+        remaining = [group for group in groups if group not in candidates]
+        removed = [group for group in groups if group in candidates]
+        return remaining, removed
+
+    def _removed_note(self, group_id: str, removed: list[str]) -> str:
+        if removed == [group_id]:
+            return ""
+        return "（已移除条目：" + "、".join(removed) + "）"
 
     def _allow_command_llm(self) -> bool:
         return bool(self.config.get("allow_command_llm", True))
@@ -241,7 +257,7 @@ class GroupLLMGuard(Star):
             f"{umo_prefix}{group_id}",
         }
         # session_id 和 UMO 描述的是当前会话，只有目标群就是当前群时才能参与匹配。
-        if group_id == self._group_id(event):
+        if group_id and group_id == self._group_id(event):
             candidates.update({event.session_id, event.unified_msg_origin})
         return {candidate for candidate in candidates if candidate}
 
