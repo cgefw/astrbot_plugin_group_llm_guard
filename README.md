@@ -14,7 +14,7 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 
 ## 用法
 
-群内管理员可以使用：
+默认只有 AstrBot 管理员可以使用，即 WebUI 里配置的管理员 ID（`admins_id`，可用 `/sid` 查看自己的 ID）。各平台的群管理员不算 AstrBot 管理员。指令权限可以在 WebUI 的指令管理里调整。
 
 ```text
 /groupllm off
@@ -51,9 +51,16 @@ https://github.com/cgefw/astrbot_plugin_group_llm_guard
 - `whitelist_mode`: 默认关闭。开启后切换到白名单模式，仅 `enabled_group_ids` 中的群可以使用 LLM 聊天。
 - `disabled_group_ids`: 黑名单，要关闭 LLM 聊天的群号列表。可填 `group_id`、`platform:group_id`、`platform_id:group_id` 或完整 UMO。
 - `enabled_group_ids`: 白名单，允许 LLM 聊天的群号列表，仅在白名单模式生效。格式同黑名单。
-- `allow_command_llm`: 默认开启。开启时，指令触发的 LLM 请求会被放行。
+- `allow_command_llm`: 默认开启。开启时，指令内主动调用的 LLM 请求会被放行；关闭后这些请求也会被拦截，该指令会在调用 LLM 处终止。不调用 LLM 的 `/` 指令不受影响。
 - `blocked_reply`: 默认空字符串，表示静默拦截。填入文字后，拦截普通 LLM 聊天时会回复这段提示。
 
 ## 说明
 
-插件通过 `on_llm_request` 钩子拦截目标群聊的非指令 LLM 请求。它不会调用 `event.stop_event()` 去提前终止普通消息事件，因此不会把 `/` 指令一并关掉。
+插件通过 `on_llm_request` 钩子拦截目标群聊的 LLM 请求，在钩子内调用 `event.stop_event()`。这会终止整个消息事件：本次 LLM 请求不会发出，优先级更低的其他 `on_llm_request` 钩子也不会再执行。
+
+普通聊天的 LLM 请求在指令处理完之后才发起，所以拦截它不会影响 `/` 指令。指令自己调用 LLM（`yield event.request_llm(...)`）时，钩子会在指令执行过程中触发，是否放行由 `allow_command_llm` 决定。
+
+已知限制：
+
+- 拦截发生在 AstrBot 准备 LLM 请求之后。在此之前，“正在输入”提示、会话与对话记录的准备、图片转述（如果配置了图片转述模型）等预处理仍会执行。
+- 只拦截经过 AstrBot LLM 流程的请求，即普通聊天和 `event.request_llm`。其他插件直接调用 `context.llm_generate()` 或提供商接口时不经过这个钩子，不会被拦截。
